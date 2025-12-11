@@ -37,7 +37,23 @@ function normalizeBlocks(content: string | ClaudeContentBlock[], triggerSignal?:
     if (block.type === "tool_result") {
       // 将工具结果作为纯文本传递，让 OpenAI 模型能够直接读取
       // 添加工具ID标识，帮助模型理解这是工具调用的结果
-      const toolResult = block.content ?? "";
+      let toolResult = block.content ?? "";
+      
+      // 处理工具结果的内容格式
+      if (typeof toolResult === "string") {
+        // 如果是字符串，直接使用
+        toolResult = toolResult;
+      } else if (Array.isArray(toolResult)) {
+        // 如果是数组（如测试用例中的格式），提取文本内容
+        toolResult = toolResult
+          .filter((item: any) => item && item.type === "text")
+          .map((item: any) => item.text || "")
+          .join("\n");
+      } else if (typeof toolResult === "object" && toolResult !== null) {
+        // 如果是对象，尝试转换为 JSON 字符串
+        toolResult = JSON.stringify(toolResult, null, 2);
+      }
+      
       return `[工具调用结果 - ID: ${block.tool_use_id}]\n${toolResult}`;
     }
     if (block.type === "tool_use") {
@@ -82,7 +98,11 @@ export function mapClaudeToOpenAI(body: ClaudeRequest, config: ProxyConfig, trig
     let content = normalizeBlocks(message.content, triggerSignal);
     
     // 如果是用户消息且思考模式已启用，在消息末尾添加思考提示符
-    if (message.role === "user" && body.thinking && body.thinking.type === "enabled") {
+    // 但排除包含工具结果的消息，避免干扰模型对工具结果的读取
+    const hasToolResult = Array.isArray(message.content) &&
+      message.content.some((block: any) => block.type === "tool_result");
+    
+    if (message.role === "user" && body.thinking && body.thinking.type === "enabled" && !hasToolResult) {
       content = content + THINKING_HINT;
     }
     
